@@ -1,11 +1,12 @@
 using UnityEngine;
 using UnityEngine.UIElements;
+using DG.Tweening;
 
 public class HUDController : MonoBehaviour
 {
     // References to UI elements
     private VisualElement root;
-    private Label navModeLabel, coreLabel, taskLabel, waypointsLabel, threatLabel, heatMapLabel, subtitlesLabel, expressionLabel;
+    private Label navModeLabel, coreLabel, taskLabel, waypointsLabel, threatLabel, heatMapLabel, subtitlesLabel, expressionLabel, powerMeterLabel;
     private VisualElement powerMeter, moodDial;
     private Button skillsButton, mapButton;
 
@@ -34,22 +35,37 @@ public class HUDController : MonoBehaviour
         heatMapLabel = root.Q<Label>("HeatMap");
         subtitlesLabel = root.Q<Label>("Subtitles");
         expressionLabel = root.Q<Label>("ExpressionLabel");
+        powerMeterLabel = root.Q<Label>("PowerMeterLabel");
         powerMeter = root.Q<VisualElement>("PowerMeter");
         moodDial = root.Q<VisualElement>("MoodDial");
         skillsButton = root.Q<Button>("SkillsButton");
         mapButton = root.Q<Button>("MapButton");
 
         // Debug logs to confirm queries
+        Debug.Log("PowerMeterLabel found: " + (powerMeterLabel != null));
         Debug.Log("PowerMeter found: " + (powerMeter != null));
         Debug.Log("SubtitlesLabel found: " + (subtitlesLabel != null));
         Debug.Log("MoodDial found: " + (moodDial != null));
 
-        // Register button click events
-        if (skillsButton != null) skillsButton.RegisterCallback<ClickEvent>(OnSkillsButtonClicked);
-        if (mapButton != null) mapButton.RegisterCallback<ClickEvent>(OnMapButtonClicked);
+        // Register button click and hover events
+        if (skillsButton != null)
+        {
+            skillsButton.RegisterCallback<ClickEvent>(OnSkillsButtonClicked);
+            skillsButton.RegisterCallback<MouseEnterEvent>(evt => OnButtonHover(skillsButton));
+            skillsButton.RegisterCallback<MouseLeaveEvent>(evt => OnButtonLeave(skillsButton));
+        }
+        if (mapButton != null)
+        {
+            mapButton.RegisterCallback<ClickEvent>(OnMapButtonClicked);
+            mapButton.RegisterCallback<MouseEnterEvent>(evt => OnButtonHover(mapButton));
+            mapButton.RegisterCallback<MouseLeaveEvent>(evt => OnButtonLeave(mapButton));
+        }
 
         isInitialized = true; // Mark as initialized
         InitializeHUD();
+
+        // Start Power Meter pulsing animation
+        StartPowerMeterPulse();
     }
 
     private void InitializeHUD()
@@ -62,9 +78,78 @@ public class HUDController : MonoBehaviour
         if (waypointsLabel != null) waypointsLabel.text = "Waypoint: Lab Entrance (50m)";
         if (threatLabel != null) threatLabel.text = "Threats: None";
         if (heatMapLabel != null) heatMapLabel.text = "Temp: 22°C";
-        if (subtitlesLabel != null) subtitlesLabel.text = testDialogue;
+        if (subtitlesLabel != null)
+        {
+            subtitlesLabel.style.opacity = 0; // Start with invisible text
+            UpdateDialogue(testDialogue); // This will trigger the fade-in
+        }
         if (expressionLabel != null) expressionLabel.text = "Mood: " + testMood;
+        if (moodDial != null)
+        {
+            // Set an initial color to avoid null/invalid color issues
+            moodDial.style.backgroundColor = new StyleColor(new Color(1f, 0f, 1f, 0.5f)); // Playful color (magenta)
+        }
         UpdatePowerMeter(testPowerPercentage);
+    }
+
+    private void StartPowerMeterPulse()
+    {
+        if (powerMeter == null) return;
+
+        float pulseDuration = testPowerPercentage > 50 ? 1f : 0.5f; // Faster pulse when low
+        powerMeter.style.scale = new StyleScale(new Vector2(1f, 1f)); // Reset scale
+
+        // Animate scale using DOValue
+        float scaleValue = 1f;
+        DOTween.To(() => scaleValue, x => scaleValue = x, 1.1f, pulseDuration)
+            .SetLoops(-1, LoopType.Yoyo)
+            .SetEase(Ease.InOutSine)
+            .OnUpdate(() =>
+            {
+                powerMeter.style.scale = new StyleScale(new Vector2(scaleValue, scaleValue));
+            });
+    }
+
+    private void OnButtonHover(Button button)
+    {
+        if (button == null) return;
+
+        // Stop any existing animation
+        DOTween.Kill(button);
+
+        // Get the current color (default to stylesheet color if not set)
+        Color baseColor = button.resolvedStyle.backgroundColor;
+        if (baseColor == Color.clear) // Fallback if no color is set
+        {
+            baseColor = new Color(128f / 255f, 0f, 255f / 255f, 0.5f); // rgba(128, 0, 255, 0.5)
+        }
+
+        // Animate the alpha to create a shimmer effect (0.5 to 0.8 and back)
+        float alpha = baseColor.a;
+        DOTween.To(() => alpha, x =>
+        {
+            alpha = x;
+            button.style.backgroundColor = new StyleColor(new Color(baseColor.r, baseColor.g, baseColor.b, alpha));
+        }, 0.8f, 0.5f)
+            .SetLoops(-1, LoopType.Yoyo)
+            .SetEase(Ease.InOutSine)
+            .SetId(button);
+    }
+
+    private void OnButtonLeave(Button button)
+    {
+        if (button == null) return;
+
+        // Stop the shimmer animation
+        DOTween.Kill(button);
+
+        // Reset to the original color
+        Color baseColor = button.resolvedStyle.backgroundColor;
+        if (baseColor == Color.clear)
+        {
+            baseColor = new Color(128f / 255f, 0f, 255f / 255f, 0.5f);
+        }
+        button.style.backgroundColor = new StyleColor(new Color(baseColor.r, baseColor.g, baseColor.b, 0.5f));
     }
 
     public void UpdatePowerMeter(float percentage)
@@ -80,6 +165,10 @@ public class HUDController : MonoBehaviour
         powerMeter.style.backgroundColor = percentage > 50
             ? new StyleColor(new Color(1f, 0f, 1f, 0.5f))
             : new StyleColor(new Color(1f, 0f, 0f, 0.5f));
+
+        // Update pulse speed based on new percentage
+        DOTween.Kill(powerMeter); // Stop existing animation
+        StartPowerMeterPulse(); // Restart with updated speed
     }
 
     public void UpdateMoodDial(string mood)
@@ -90,14 +179,31 @@ public class HUDController : MonoBehaviour
             return;
         }
 
-        Color moodColor = mood.ToLower() switch
+        Color targetColor = mood.ToLower() switch
         {
             "playful" => new Color(1f, 0f, 1f, 0.5f),
             "happy" => new Color(0f, 1f, 0f, 0.5f),
             "sad" => new Color(0f, 0f, 1f, 0.5f),
             _ => new Color(1f, 1f, 1f, 0.5f)
         };
-        moodDial.style.backgroundColor = new StyleColor(moodColor);
+
+        // Get the current color, default to white if not set
+        Color currentColor = moodDial.resolvedStyle.backgroundColor;
+        if (currentColor == Color.clear)
+        {
+            currentColor = new Color(1f, 1f, 1f, 0.5f); // Default to white
+        }
+
+        // Animate the color transition
+        float t = 0f;
+        DOTween.To(() => t, x =>
+        {
+            t = x;
+            Color lerpedColor = Color.Lerp(currentColor, targetColor, t);
+            moodDial.style.backgroundColor = new StyleColor(lerpedColor);
+        }, 1f, 0.5f)
+            .SetEase(Ease.InOutSine);
+
         expressionLabel.text = $"Mood: {mood}";
     }
 
@@ -109,7 +215,25 @@ public class HUDController : MonoBehaviour
             return;
         }
 
-        subtitlesLabel.text = text;
+        // Reset scale and opacity
+        subtitlesLabel.style.scale = new StyleScale(new Vector2(1f, 1f));
+        subtitlesLabel.style.opacity = 1;
+
+        // Create a sequence for fade-out, text update, and fade-in with a subtle pulse
+        var sequence = DOTween.Sequence();
+        sequence.Append(DOTween.To(() => subtitlesLabel.style.opacity.value, x => subtitlesLabel.style.opacity = x, 0f, 0.3f)) // Fade out
+                .AppendCallback(() => subtitlesLabel.text = text) // Update text
+                .Append(DOTween.To(() => subtitlesLabel.style.opacity.value, x => subtitlesLabel.style.opacity = x, 1f, 0.3f)); // Fade in
+
+        // Add subtle scale pulse during fade-in
+        float scaleValue = 1f;
+        sequence.Join(DOTween.To(() => scaleValue, x =>
+        {
+            scaleValue = x;
+            subtitlesLabel.style.scale = new StyleScale(new Vector2(scaleValue, scaleValue));
+        }, 1.05f, 0.3f)
+            .SetLoops(2, LoopType.Yoyo)
+            .SetEase(Ease.InOutSine));
     }
 
     private void OnSkillsButtonClicked(ClickEvent evt)
@@ -124,7 +248,6 @@ public class HUDController : MonoBehaviour
         UpdateMoodDial("playful");
     }
 
-    // Inspector button methods for testing
     [ContextMenu("Test Power Meter")]
     public void TestPowerMeter()
     {
@@ -143,10 +266,9 @@ public class HUDController : MonoBehaviour
         UpdateDialogue(testDialogue);
     }
 
-    // Update method called when test fields change
     private void OnValidate()
     {
-        if (!isInitialized) return; // Skip updates until initialized
+        if (!isInitialized) return;
 
         UpdatePowerMeter(testPowerPercentage);
         UpdateMoodDial(testMood);
